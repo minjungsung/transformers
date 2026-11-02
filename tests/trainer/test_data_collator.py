@@ -445,6 +445,29 @@ class TestDataCollatorWithFlattening(DataCollatorTestMixin, unittest.TestCase):
         self.assertEqual(batch["input_ids"].shape, (1, 16))
         self.assertEqual(batch["position_ids"].shape, (1, 16))
 
+    def test_single_token_sequences_preserve_packed_boundaries(self):
+        features = [
+            {"input_ids": [1], "labels": [10]},
+            {"input_ids": [2, 3, 4], "labels": [20, -100, 40]},
+            {"input_ids": [5], "labels": [50]},
+        ]
+        for return_tensors in ["pt", "np"]:
+            with self.subTest(return_tensors=return_tensors):
+                collator = DataCollatorWithFlattening(
+                    return_tensors=return_tensors, return_seq_idx=True, return_flash_attn_kwargs=True
+                )
+                batch = collator(features)
+
+                self.assertEqual(batch["input_ids"].tolist(), [[1, 2, 3, 4, 5]])
+                self.assertEqual(batch["labels"].tolist(), [[-100, -100, -100, 40, -100]])
+                self.assertEqual(batch["position_ids"].tolist(), [[0, 0, 1, 2, 0]])
+                self.assertEqual(batch["seq_idx"].tolist(), [[0, 1, 1, 1, 2]])
+                self.assertEqual(batch["cu_seq_lens_q"].tolist(), [0, 1, 4, 5])
+                self.assertEqual(batch["cu_seq_lens_k"].tolist(), [0, 1, 4, 5])
+                self.assertEqual(batch["max_length_q"], 3)
+                self.assertEqual(batch["max_length_k"], 3)
+                self.assertEqual(features[1]["labels"], [20, -100, 40])
+
     def test_numpy_flash_attn_kwargs(self):
         """Test flattening with Flash Attention kwargs and NumPy output."""
         collator = DataCollatorWithFlattening(return_tensors="np", return_flash_attn_kwargs=True)
